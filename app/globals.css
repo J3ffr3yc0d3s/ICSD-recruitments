@@ -142,10 +142,9 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: #000000; /* global dark background */
+  background: transparent;
   color: #ffffff;
-  min-height: 100dvh; /* use dynamic vh to avoid mobile toolbar issues */
-  overscroll-behavior-y: contain; /* prevent white flash on bounce */
+  min-height: 100%;
   overflow-x: hidden;
   max-width: 100vw;
 }
