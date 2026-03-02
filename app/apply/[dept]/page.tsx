@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { departments } from '@/data/departments';
 import { departmentQuestions } from '@/data/questions';
 
 const MAX_APPLICATIONS = 2;
+const REGISTRATION_REGEX = /^[0-9]{2}[A-Za-z]{3}[0-9]{4}$/;
 
 export default function ApplicationPage() {
   const params = useParams();
@@ -17,9 +18,11 @@ export default function ApplicationPage() {
   const [name, setName] = useState('');
   const [registrationNumber, setRegistrationNumber] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [departmentCount, setDepartmentCount] = useState(0);
   const [alreadyAppliedToThisDept, setAlreadyAppliedToThisDept] = useState(false);
 
@@ -65,6 +68,13 @@ export default function ApplicationPage() {
 
     if (!registrationNumber) {
       setError('Please enter your registration number');
+      setLoading(false);
+      return;
+    }
+
+    // validate registration number format: 2 digits, 3 letters, 4 digits (e.g. 25BRS1024)
+    if (!REGISTRATION_REGEX.test(registrationNumber)) {
+      setError('pls enter valid registration number');
       setLoading(false);
       return;
     }
@@ -134,6 +144,9 @@ export default function ApplicationPage() {
       departmentApps[dept] = email;
       localStorage.setItem('departmentApplications', JSON.stringify(departmentApps));
 
+      // clear any saved draft for this department
+      localStorage.removeItem(`applicationDraft_${dept}`);
+      setSavedAt(null);
       // Redirect to success page
       router.push('/success');
     } catch (err) {
@@ -149,18 +162,89 @@ export default function ApplicationPage() {
   const canApplyMore = useMemo(() => departmentCount < MAX_APPLICATIONS, [departmentCount]);
   const canSubmit = canApplyMore && !alreadyAppliedToThisDept;
 
+  // save field values to localStorage whenever they change (draft caching)
+  useEffect(() => {
+    if (!isHydrated) return; // Prevent overwriting draft before it's loaded
+
+    // Synchronize global applicant fields back to localStorage if they edit them here
+    localStorage.setItem('applicantName', name);
+    localStorage.setItem('applicantRegNo', registrationNumber);
+
+    const debounceTimer = setTimeout(() => {
+      try {
+        const draftKey = `applicationDraft_${dept}`;
+        // normalize answers into an ordered array so storage/restoration is reliable
+        const answersArray = questions.map((_, i) => answers[`q${i}`] ?? '');
+        const draft = { name, registrationNumber, answers: answersArray };
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+        setSavedAt(new Date().toISOString());
+      } catch (err) {
+        console.error('Failed to save draft to localStorage', err);
+      }
+    }, 800);
+
+    return () => clearTimeout(debounceTimer);
+  }, [dept, name, registrationNumber, answers, isHydrated, questions]);
+
+  // keep a ref to the latest draft so the popstate handler can save it synchronously
+  const draftRef = useRef({ name: '', registrationNumber: '', answers: {} as Record<string, string> });
+  useEffect(() => {
+    draftRef.current = { name, registrationNumber, answers };
+  }, [name, registrationNumber, answers]);
+
+  // intercept browser/back events (includes mobile hardware back), save draft and redirect to home
+  useEffect(() => {
+    // add a history entry so pressing back triggers popstate here instead of leaving immediately
+    try {
+      window.history.pushState({ applyPage: true }, '', window.location.href);
+    } catch (e) {
+      /* ignore */
+    }
+
+    const handlePop = (_event: PopStateEvent) => {
+      try {
+        const draftKey = `applicationDraft_${dept}`;
+        const d = draftRef.current;
+        // convert answers object to ordered array before saving
+        const answersArray = questions.map((_, i) => d.answers[`q${i}`] ?? '');
+        const draft = { name: d.name, registrationNumber: d.registrationNumber, answers: answersArray };
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+      } catch (err) {
+        console.error('Failed to save draft before navigating back', err);
+      }
+
+      // navigate to home page
+      router.push('/');
+    };
+
+    window.addEventListener('popstate', handlePop);
+    return () => {
+      window.removeEventListener('popstate', handlePop);
+      try {
+        window.history.replaceState(null, '', window.location.href);
+      } catch (e) {
+        /* ignore */
+      }
+    };
+  }, [router, dept, questions]);
+
   // All hooks must be called before conditional returns
   useEffect(() => {
     // Check if email is verified using timestamp (only on mount)
     const storedEmail = localStorage.getItem('applicantEmail');
     const verifiedAt = localStorage.getItem('emailVerifiedAt');
-    
+    const storedName = localStorage.getItem('applicantName') || '';
+    const storedRegNo = localStorage.getItem('applicantRegNo') || '';
+
     if (!storedEmail || !verifiedAt) {
       router.push('/verify');
       return;
     }
 
     setEmail(storedEmail);
+    // Initialize name and registration number from base storage first
+    setName(storedName);
+    setRegistrationNumber(storedRegNo);
     setIsVerified(true);
 
     // Check department application count (only on mount)
@@ -179,7 +263,45 @@ export default function ApplicationPage() {
     questions.forEach((_, index) => {
       initialAnswers[`q${index}`] = '';
     });
-    setAnswers(initialAnswers);
+    // load any saved draft for this department
+    try {
+      const draftKey = `applicationDraft_${dept}`;
+      const draftStr = localStorage.getItem(draftKey);
+      if (draftStr) {
+        const draft = JSON.parse(draftStr);
+        // If the draft has a name/reg, and the global storage was empty or not populated, use draft.
+        // Otherwise, prioritize the global applicant storage.
+        if (draft.name && !storedName) setName(draft.name);
+        if (draft.registrationNumber && !storedRegNo) setRegistrationNumber(draft.registrationNumber);
+
+        // draft.answers may be an ordered array (preferred) or an object (older format)
+        const restored: Record<string, string> = { ...initialAnswers };
+        if (Array.isArray(draft.answers)) {
+          draft.answers.forEach((val: unknown, i: number) => {
+            restored[`q${i}`] = typeof val === 'string' ? val : String(val ?? '');
+          });
+        } else if (draft.answers && typeof draft.answers === 'object') {
+          Object.entries(draft.answers).forEach(([k, v]) => {
+            restored[k] = typeof v === 'string' ? v : String(v ?? '');
+          });
+        }
+        setAnswers(restored);
+        // indicate draft was restored
+        setSavedAt(new Date().toISOString());
+      } else {
+        setAnswers(initialAnswers);
+      }
+    } catch (err) {
+      console.error('Failed to parse draft from localStorage, removing corrupted data', err);
+      try {
+        localStorage.removeItem(`applicationDraft_${dept}`);
+      } catch (e) {
+        // ignore
+      }
+      setAnswers(initialAnswers);
+    } finally {
+      setIsHydrated(true);
+    }
   }, [dept, questions, router]);
 
   // Conditional renders after all hooks
@@ -216,6 +338,12 @@ export default function ApplicationPage() {
 
         <h1>Apply for {department.name}</h1>
 
+        {savedAt && (
+          <div className="draft-indicator" style={{ marginBottom: '12px', color: '#2f8f4a' }}>
+            Saved draft • {new Date(savedAt).toLocaleString()}
+          </div>
+        )}
+
         {(!canApplyMore || alreadyAppliedToThisDept) && (
           <div className="limit-warning">
             {alreadyAppliedToThisDept
@@ -230,7 +358,7 @@ export default function ApplicationPage() {
           {/* Personal Information Section */}
           <div className="form-section">
             <h2>Personal Information</h2>
-            
+
             <div className="form-group">
               <label>Email Address</label>
               <input
@@ -267,11 +395,11 @@ export default function ApplicationPage() {
           <div className="form-section">
             <h2>Department Questions</h2>
             {!questions || questions.length === 0 ? (
-              <div style={{ 
-                padding: '15px', 
-                backgroundColor: '#1a3a1a', 
-                border: '1px solid #f4d03f', 
-                borderRadius: '6px', 
+              <div style={{
+                padding: '15px',
+                backgroundColor: '#1a3a1a',
+                border: '1px solid #f4d03f',
+                borderRadius: '6px',
                 color: '#f4d03f',
                 marginBottom: '20px'
               }}>
@@ -296,8 +424,8 @@ export default function ApplicationPage() {
             )}
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="submit-button"
             disabled={loading || !canSubmit}
           >

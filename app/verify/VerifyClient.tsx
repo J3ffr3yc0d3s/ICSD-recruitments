@@ -6,12 +6,15 @@ import Link from 'next/link';
 
 export default function VerifyClient() {
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [registrationNumber, setRegistrationNumber] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isRedirecting, setIsRedirecting] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const deptParam = searchParams.get('dept') || 'technical';
+  const REGISTRATION_REGEX = /^[0-9]{2}[A-Za-z]{3}[0-9]{4}$/;
 
   // Check if email is already verified (only once on mount)
   useEffect(() => {
@@ -43,8 +46,25 @@ export default function VerifyClient() {
       return;
     }
 
-    // Store email and verification timestamp in localStorage
-    localStorage.setItem('applicantEmail', email);
+    if (!name.trim()) {
+      setError('Please enter your full name');
+      return;
+    }
+
+    if (!registrationNumber.trim()) {
+      setError('Please enter your registration number');
+      return;
+    }
+
+    if (!REGISTRATION_REGEX.test(registrationNumber.trim())) {
+      setError('Please enter a valid registration number (e.g. 25BRS1024)');
+      return;
+    }
+
+    // Store email, name, reg no, and verification timestamp in localStorage
+    localStorage.setItem('applicantEmail', email.trim().toLowerCase());
+    localStorage.setItem('applicantName', name.trim());
+    localStorage.setItem('applicantRegNo', registrationNumber.trim().toUpperCase());
     localStorage.setItem('emailVerifiedAt', Date.now().toString());
 
     // Initialize department application count if not exists
@@ -65,9 +85,9 @@ export default function VerifyClient() {
       <Link href="/" style={{ textDecoration: 'none', color: '#58cce9', marginBottom: '20px', display: 'inline-block' }}>
         ← Back to Home
       </Link>
-      
+
       <h1>Verify Your Email</h1>
-      
+
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="email">Email Address</label>
@@ -78,6 +98,31 @@ export default function VerifyClient() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="your@email.com"
           />
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="name">Full Name</label>
+          <input
+            type="text"
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your full name"
+          />
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="regNo">Registration Number</label>
+          <input
+            type="text"
+            id="regNo"
+            value={registrationNumber}
+            onChange={(e) => setRegistrationNumber(e.target.value.toUpperCase())}
+            placeholder="e.g. 25BRS1024"
+          />
+        </div>
+
+        <div className="form-group">
           {error && <div className="error-message">{error}</div>}
           {success && <div className="success-message">{success}</div>}
         </div>

@@ -15,11 +15,14 @@
 export const departmentQuestions = {
   // ===== TECHNICAL DEPARTMENT =====
   technical: [
-    'What technical skills or tools are you most comfortable with?',
-    'Describe a technical problem you solved recently.',
-    'How do you stay updated with new technologies?',
-    'What interests you about joining the Technical team?'
-  ],
+  'What made you interested in joining the Technical Department?',
+  'Have you worked on any technical projects? If yes, briefly describe them.',
+  'What is the most ambitious technical project you have worked on?',
+  'What is one fictional gadget you would like to create, and why?',
+  'What technical skills or tools are you currently familiar with?',
+  'Describe a technical challenge you faced and how you approached it.',
+  'You will need to invest a few hours every week for club activities. How do you plan to manage your time and commitments?'
+],
 
   // ===== RESEARCH DEPARTMENT =====
   research: [
@@ -50,11 +53,11 @@ webdev: [
 
   // ===== SOCIAL MEDIA DEPARTMENT =====
   'social-media': [
-    'Share links to any previous work you have done (reels, carousels, posts, etc.).',
+    'Why do you want to join the Social Media Department?',
     'What experience do you have with video editing?',
     'How well do you follow and adapt to current social media trends?',
     'How would you increase engagement for a page with low reach?',
-    'Why do you want to join the Social Media Department?'
+    'Share links to any previous work you have done (reels, carousels, posts, etc.).',
   ],
 
   // ===== DESIGN AND CONTENT DEPARTMENT =====

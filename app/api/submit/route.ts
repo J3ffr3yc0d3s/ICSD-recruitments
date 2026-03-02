@@ -4,6 +4,7 @@ import { departments } from '@/data/departments';
 import { google } from 'googleapis';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const REGISTRATION_REGEX = /^[0-9]{2}[A-Za-z]{3}[0-9]{4}$/;
 const MAX_APPLICATIONS = 2;
 const ALLOWED_DEPARTMENT_IDS = departments.map((d) => d.id);
 
@@ -57,8 +58,8 @@ export async function POST(request: Request) {
     }
 
     const registrationNumber = String(data.registrationNumber).trim();
-    if (!registrationNumber) {
-      return Response.json({ error: 'Registration number cannot be empty' }, {
+    if (!REGISTRATION_REGEX.test(registrationNumber)) {
+      return Response.json({ error: 'Please enter a valid registration number (e.g., 25BRS1024)' }, {
         status: 400,
       });
     }
@@ -82,6 +83,13 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    // sort keys numerically so answers stay in order even if JSON order is weird
+    answerKeys.sort((a, b) => {
+      const na = parseInt(a.split('_')[1] || '0', 10);
+      const nb = parseInt(b.split('_')[1] || '0', 10);
+      return na - nb;
+    });
 
     // --- Server-side 2-application limit enforcement via Google Sheets API ---
     const sheetId = process.env.GOOGLE_SHEET_ID;
@@ -111,11 +119,22 @@ export async function POST(request: Request) {
         spreadsheetId: sheetId,
         range: 'Applications!B:B',
       });
+
       const values = resp.data.values || [];
-      emailCount = values
-        .flat()
-        .filter((e) => typeof e === 'string' && e.trim().toLowerCase() === email)
-        .length;
+
+      // Efficient backwards search to avoid .flat() memory overhead and allow short-circuiting
+      for (let i = values.length - 1; i >= 0; i--) {
+        const row = values[i];
+        if (row && row.length > 0) {
+          const e = row[0];
+          if (typeof e === 'string' && e.trim().toLowerCase() === email) {
+            emailCount++;
+            if (emailCount >= MAX_APPLICATIONS) {
+              break;
+            }
+          }
+        }
+      }
     } catch (err) {
       console.error('Failed to read existing emails from sheet:', err);
       return Response.json(
@@ -131,7 +150,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // assemble row values (always 16 columns)
+    // assemble row values; include all answers instead of a fixed 5
     const timestamp = new Date().toISOString();
     const row: (string | null)[] = [
       timestamp,
@@ -141,22 +160,21 @@ export async function POST(request: Request) {
       data.departmentName || department,
     ];
 
-    // answers correspond to columns F–J (up to 5)
-    for (let i = 0; i < 5; i++) {
-      const key = `answer_${i + 1}`;
-      const val = answerKeys.includes(key) ? String(data[key] ?? '') : '';
-      row.push(val);
-    }
+    // add each answer in order
+    answerKeys.forEach((key) => {
+      row.push(String(data[key] ?? ''));
+    });
 
-    // pad dept2 columns K–P with empties
-    while (row.length < 16) {
+    // keep previous minimum length for backward compatibility
+    const MIN_COLUMNS = 16;
+    while (row.length < MIN_COLUMNS) {
       row.push('');
     }
 
     try {
       await sheets.spreadsheets.values.append({
         spreadsheetId: sheetId,
-        range: 'Applications!A:P',
+        range: 'Applications!A:Z',
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [row],
