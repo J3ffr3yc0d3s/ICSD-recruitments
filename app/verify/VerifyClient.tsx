@@ -78,7 +78,7 @@ export default function VerifyClient() {
       setIsRedirecting(true);
       router.push(`/apply/${deptParam}`);
     }, 1500);
-  }, [email, validateEmail, deptParam, router]);
+  }, [email, name, registrationNumber, validateEmail, deptParam, router]);
 
   return (
     <div className="verify-container">
